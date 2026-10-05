@@ -48,21 +48,24 @@ pdfmetrics.registerFont(TTFont("GeistMono-SemiBold", FONTS / "GeistMono-SemiBold
 REG, SEMI = "GeistMono", "GeistMono-SemiBold"
 
 # ── data ───────────────────────────────────────────────────────────────────
-# Source: the student's group list (variant C) and the faculty e-mail of
-# 1 Oct 2026. `kind` drives the block style: "wyk" = lecture (solid),
-# anything else = outlined.
+# Source: the student's USOS timetable (groups as registered) and the faculty
+# e-mail of 1 Oct 2026. USOS lists start times only; every slot is 90 min.
+# `kind` drives the block style: "WYK" = lecture (solid), others = outlined.
 DAYS = ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"]
 
+FORMS = {"WYK": "wykład", "CW": "ćwiczenia", "KON": "konwersatorium"}
+
 CLASSES = [
-    # day, start, end, subject, form, lecturer, kind
-    (0, "16:00", "17:30", "Python", "wykład", "Jabłonowski", "wyk"),
-    (1, "17:45", "19:15", "Python", "ćwiczenia · gr. 2", "Rutka", "cw"),
-    (1, "19:30", "21:00", "Etyka", "", "Kaczmarek", "inne"),
-    (2, "16:00", "17:30", "Matematyka", "wykład", "Skałba", "wyk"),
-    (2, "17:45", "19:15", "Matematyka", "ćwiczenia", "Skałba", "cw"),
-    (3, "16:00", "17:30", "Filozofia", "", "Jamrozik", "inne"),
-    (3, "17:45", "19:15", "Kognitywistyka", "", "Komorowska-Mach,\nSękowski", "inne"),
+    # day, start, subject, USOS code, kind, group, room, lecturer
+    (0, "16:00", "Podstawy programowania w Pythonie", "3800-AIK-PProgP", "WYK", 1, "4.31", "Jabłonowski"),
+    (1, "16:00", "Podstawy programowania w Pythonie", "3800-AIK-PProgP", "CW", 2, "3.13", "Rutka"),
+    (1, "19:30", "Etyka technologii cyfrowych i badań naukowych", "3800-AIK-ETC", "WYK", 1, "3.23", "Kaczmarek"),
+    (2, "16:00", "Matematyka dla AI I", "3800-AIK-MAI1", "WYK", 1, "2.01", "Skałba"),
+    (2, "17:45", "Matematyka dla AI I", "3800-AIK-MAI1", "CW", 3, "2.19", "Skałba"),
+    (3, "16:00", "Wprowadzenie do filozofii", "3800-AIK-WF", "KON", 3, "3.25", "Jamrozik"),
+    (3, "17:45", "Wprowadzenie do kognitywistyki", "3800-AIK-WK", "WYK", 1, "3.25", "Komorowska-Mach,\nSękowski"),
 ]
+SLOT = 90  # minutes
 FREE_DAY = 4
 SATURDAY = (5, "Praktyczne projekty", "gr. 1", "Jabłonowski",
             ["druga połowa", "semestru", "", "godziny", "do potwierdzenia"])
@@ -84,6 +87,10 @@ T0, T1 = 16 * 60, 21 * 60  # visible time window
 def minutes(hhmm):
     h, m = hhmm.split(":")
     return int(h) * 60 + int(m)
+
+
+def hhmm(m):
+    return f"{m // 60}:{m % 60:02d}"
 
 
 # ── text helpers ───────────────────────────────────────────────────────────
@@ -165,16 +172,16 @@ def header(c):
     text(c, M_LEFT, y - 15, meta, REG, 7.2, MUTED)
 
     n = len(CLASSES)
-    hours = sum(minutes(e) - minutes(s) for _, s, e, *_ in CLASSES) / 60
+    hours = n * SLOT / 60
     summary = f"{n} spotkań tygodniowo · {hours:.1f} h".replace(".", ",") + " · piątek wolny"
     text(c, M_RIGHT, y - 15, summary, REG, 7.2, MUTED, align="right")
     return y - 15 - 22
 
 
-def block(c, x, y_top, w, h, start, end, subject, form, lecturer, kind):
+def block(c, x, y_top, w, h, start, end, subject, code, kind, group, room, lecturer):
     pad = 6
-    solid = kind == "wyk"
-    if solid:
+    inner = w - 2 * pad
+    if kind == "WYK":
         c.setFillColor(INK)
         c.rect(x, y_top - h, w, h, stroke=0, fill=1)
         fg, sub = PAPER, PAPER
@@ -187,13 +194,16 @@ def block(c, x, y_top, w, h, start, end, subject, form, lecturer, kind):
 
     y = y_top - pad - 7
     text(c, x + pad, y, f"{start}–{end}", REG, 7, sub)
-    y -= 15
-    text(c, x + pad, y, subject, SEMI, 8.4, fg)
-    if form:
-        y -= 11.2
-        text(c, x + pad, y, form, REG, 7.6, fg)
+    text(c, x + w - pad, y, f"s. {room}", REG, 7, sub, align="right")
+    y -= 14
+    for ln in wrap(subject, SEMI, 8.4, inner):
+        text(c, x + pad, y, ln, SEMI, 8.4, fg)
+        y -= 10.5
+    y -= 1
+    text(c, x + pad, y, f"{FORMS[kind]} · gr. {group}", REG, 7.6, fg)
+    text(c, x + pad, y - 10, code, REG, 7, sub)
 
-    lines = wrap(lecturer, REG, 7, w - 2 * pad)
+    lines = wrap(lecturer, REG, 7, inner)
     yb = y_top - h + pad + 2 + (len(lines) - 1) * 10
     for ln in lines:
         text(c, x + pad, yb, ln, REG, 7, sub)
@@ -230,9 +240,11 @@ def timetable(c, y_top, y_bottom):
         text(c, M_LEFT, label_y, f"{m // 60}:00", REG, 7, MUTED)
 
     # classes
-    for day, s, e, subject, form, lecturer, kind in CLASSES:
-        top, bot = ty(minutes(s)), ty(minutes(e))
-        block(c, col_x[day], top, col_w, top - bot, s, e, subject, form, lecturer, kind)
+    for day, s, subject, code, kind, group, room, lecturer in CLASSES:
+        m0 = minutes(s)
+        top, bot = ty(m0), ty(m0 + SLOT)
+        block(c, col_x[day], top, col_w, top - bot, s, hhmm(m0 + SLOT),
+              subject, code, kind, group, room, lecturer)
 
     # free day
     mid = (g_top + g_bottom) / 2
@@ -281,7 +293,7 @@ def footer_sections(c, y_top):
     # legend
     y = section_heading(c, M_LEFT, y_top, legend_w, "Legenda")
     sw, sh = 22, 9
-    rows = [("wyk", "wykład"), ("cw", "ćwiczenia, pozostałe"), ("dash", "termin do potwierdzenia")]
+    rows = [("wyk", "wykład"), ("cw", "ćwiczenia, konwersatorium"), ("dash", "termin do potwierdzenia")]
     for kind, label in rows:
         yb = y - 2
         if kind == "wyk":
