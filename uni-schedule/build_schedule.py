@@ -66,6 +66,10 @@ CLASSES = [
     (3, "17:45", "Wprowadzenie do kognitywistyki", "3800-AIK-WK", "WYK", 1, "3.25", "Komorowska-Mach,\nSękowski"),
 ]
 SLOT = 90  # minutes
+
+# Biweekly extension (USOS markers I / II): Tuesday's Python exercises run
+# 16:00-17:30 in odd weeks (I) and 16:00-19:15 in even weeks (II).
+EVEN_WEEK_EXT = (1, "17:30", "19:15")
 FREE_DAY = 4
 SATURDAY = (5, "Praktyczne projekty", "gr. 1", "Jabłonowski",
             ["druga połowa", "semestru", "", "godziny", "do potwierdzenia"])
@@ -173,7 +177,11 @@ def header(c):
 
     n = len(CLASSES)
     hours = n * SLOT / 60
-    summary = f"{n} spotkań tygodniowo · {hours:.1f} h".replace(".", ",") + " · piątek wolny"
+    _, ext_s, ext_e = EVEN_WEEK_EXT
+    hours_even = hours + (minutes(ext_e) - minutes(ext_s)) / 60
+    fmt = lambda h: f"{h:g}".replace(".", ",")
+    summary = (f"{n} spotkań tygodniowo · {fmt(hours)} h · w tyg. parzyste "
+               f"{fmt(hours_even)} h · piątek wolny")
     text(c, M_RIGHT, y - 15, summary, REG, 7.2, MUTED, align="right")
     return y - 15 - 22
 
@@ -208,6 +216,46 @@ def block(c, x, y_top, w, h, start, end, subject, code, kind, group, room, lectu
     for ln in lines:
         text(c, x + pad, yb, ln, REG, 7, sub)
         yb -= 10
+
+
+def hatch(c, x, y, w, h, step=4.5):
+    """Muted diagonal hatching clipped to a rectangle."""
+    c.saveState()
+    p = c.beginPath()
+    p.rect(x, y, w, h)
+    c.clipPath(p, stroke=0, fill=0)
+    c.setStrokeColor(MUTED)
+    c.setLineWidth(0.35)
+    d = -h
+    while d < w:
+        c.line(x + d, y, x + d + h, y + h)
+        d += step
+    c.restoreState()
+
+
+def label(c, x, y, s, font, size, color):
+    """Text on a paper patch so it stays legible over hatching."""
+    w = pdfmetrics.stringWidth(s, font, size)
+    c.setFillColor(PAPER)
+    c.rect(x - 2, y - 2.5, w + 4, size + 2.5, stroke=0, fill=1)
+    text(c, x, y, s, font, size, color)
+
+
+def even_week_block(c, x, y_top, w, h, start, end):
+    c.setFillColor(PAPER)
+    c.rect(x, y_top - h, w, h, stroke=0, fill=1)
+    hatch(c, x, y_top - h, w, h)
+    c.setStrokeColor(INK)
+    c.setLineWidth(RULE_W)
+    c.rect(x, y_top - h, w, h, stroke=1, fill=0)
+    pad = 6
+    y = y_top - pad - 7 - 4
+    label(c, x + pad, y, f"{start}–{end}", REG, 7, INK)
+    y -= 14
+    label(c, x + pad, y, "tylko tyg.", SEMI, 8.4, INK)
+    y -= 10.5
+    label(c, x + pad, y, "parzyste (II)", SEMI, 8.4, INK)
+    label(c, x + pad, y_top - h + pad + 2, "w nieparzyste do 17:30", REG, 7, INK)
 
 
 def timetable(c, y_top, y_bottom):
@@ -250,6 +298,11 @@ def timetable(c, y_top, y_bottom):
     mid = (g_top + g_bottom) / 2
     text(c, col_x[FREE_DAY] + col_w / 2, mid, "wolne", REG, 7.6, MUTED, align="center")
 
+    # even-week extension, drawn flush under the class it continues
+    day, s, e = EVEN_WEEK_EXT
+    top, bot = ty(minutes(s)), ty(minutes(e))
+    even_week_block(c, col_x[day], top + RULE_W / 2, col_w, top - bot + RULE_W / 2, s, e)
+
     # saturday: hours not yet known, so it is not pinned to the time axis
     day, subject, group, lecturer, note = SATURDAY
     x, top, bot = col_x[day], g_top - 4, g_bottom + 4
@@ -275,6 +328,12 @@ def timetable(c, y_top, y_bottom):
     text(c, x + pad, bot + pad + 2, lecturer, REG, 7, MUTED)
 
 
+LEGEND_ROWS = [
+    ("wyk", "wykład"),
+    ("cw", "ćwiczenia, konwersatorium"),
+    ("hatch", "tylko tygodnie parzyste (II)"),
+    ("dash", "termin do potwierdzenia"),
+]
 LEGEND_W, BAND_GAP, NOTE_LABEL_W, NOTE_COL_GAP = 190, 24, 48, 18
 NOTES_W = (M_RIGHT - M_LEFT) - LEGEND_W - BAND_GAP
 NOTE_COL_W = (NOTES_W - NOTE_COL_GAP) / 2
@@ -293,8 +352,8 @@ def footer_sections(c, y_top):
     # legend
     y = section_heading(c, M_LEFT, y_top, legend_w, "Legenda")
     sw, sh = 22, 9
-    rows = [("wyk", "wykład"), ("cw", "ćwiczenia, konwersatorium"), ("dash", "termin do potwierdzenia")]
-    for kind, label in rows:
+    rows = LEGEND_ROWS
+    for kind, name in rows:
         yb = y - 2
         if kind == "wyk":
             c.setFillColor(INK)
@@ -302,12 +361,16 @@ def footer_sections(c, y_top):
         else:
             c.setStrokeColor(INK)
             c.setLineWidth(RULE_W)
+            if kind == "hatch":
+                c.setFillColor(PAPER)
+                c.rect(M_LEFT, yb, sw, sh, stroke=0, fill=1)
+                hatch(c, M_LEFT, yb, sw, sh, step=3)
             if kind == "dash":
                 c.setDash(2, 2.5)
             c.setFillColor(PAPER)
-            c.rect(M_LEFT, yb, sw, sh, stroke=1, fill=1)
+            c.rect(M_LEFT, yb, sw, sh, stroke=1, fill=0 if kind == "hatch" else 1)
             c.setDash()
-        text(c, M_LEFT + sw + 8, yb + 1.5, label, REG, 7.6, INK)
+        text(c, M_LEFT + sw + 8, yb + 1.5, name, REG, 7.6, INK)
         y -= 14
 
     # notes from the faculty e-mail
@@ -330,7 +393,7 @@ def footer_sections(c, y_top):
 def footer_height():
     """Height the bottom band needs, from its heading baseline to the last
     line's baseline (plus descender room)."""
-    legend = 2 * 14 + 2
+    legend = (len(LEGEND_ROWS) - 1) * 14 + 2
     notes = max(
         sum(len(note_lines(body)) * 10.8 + 4 for _, body in col) - 4 - 10.8
         for col in NOTE_COLS
